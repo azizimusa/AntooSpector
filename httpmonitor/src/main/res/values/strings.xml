@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="http_monitor_title">HTTP Monitor</string>
+    <string name="http_monitor_filter_hint">Filter by URL, method or status</string>
+    <string name="http_monitor_clear">Clear</string>
+    <string name="http_monitor_empty">No requests captured yet</string>
+    <string name="http_monitor_copy_curl">Copy as cURL</string>
+</resources>

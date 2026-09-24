@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Paduke</string>
+    <string name="demo_send_okhttp">Send request via OkHttp</string>
+    <string name="demo_send_urlconnection">Send request via HttpURLConnection</string>
+</resources>

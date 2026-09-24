@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="http_monitor_status_success">#FF2E7D32</color>
+    <color name="http_monitor_status_redirect">#FF1565C0</color>
+    <color name="http_monitor_status_client_error">#FFEF6C00</color>
+    <color name="http_monitor_status_server_error">#FFC62828</color>
+    <color name="http_monitor_status_failed">#FFB71C1C</color>
+    <color name="http_monitor_secondary">#FF757575</color>
+</resources>
