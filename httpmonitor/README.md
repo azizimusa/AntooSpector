@@ -4,7 +4,7 @@ In-app HTTP traffic monitor for Android: captures OkHttp and `HttpURLConnection`
 shows them in a built-in viewer (request/response headers, formatted JSON/XML bodies, timings,
 copy-as-cURL).
 
-- Group / artifact: `com.github.azizimusa.AntooSpector:http-monitor:1.0.0`
+- Group / artifact: `com.github.azizimusa:AntooSpector:1.0.0`
 - `minSdk` 24, Java 11, Kotlin
 - Depends on OkHttp 4.x (`api`), AppCompat and RecyclerView
 
@@ -28,7 +28,7 @@ and in the app module:
 
 ```kotlin
 dependencies {
-    debugImplementation("com.github.azizimusa.AntooSpector:http-monitor:1.0.0")
+    debugImplementation("com.github.azizimusa:AntooSpector:1.0.0")
 }
 ```
 
@@ -50,7 +50,7 @@ coordinates as above.
 
 ```bash
 ./gradlew :httpmonitor:publishReleasePublicationToLocalRepoRepository
-# artifacts land in build/repo/com/github/azizimusa/AntooSpector/http-monitor/1.0.0/
+# artifacts land in build/repo/com/github/azizimusa/AntooSpector/1.0.0/
 ```
 
 Copy that directory anywhere (a shared drive, another repo, an S3 bucket, an internal Maven
@@ -69,7 +69,7 @@ In the consuming project's `settings.gradle.kts`:
 ```kotlin
 includeBuild("/Users/you/AndroidStudioProjects/Paduke") {
     dependencySubstitution {
-        substitute(module("com.github.azizimusa.AntooSpector:http-monitor")).using(project(":httpmonitor"))
+        substitute(module("com.github.azizimusa:AntooSpector")).using(project(":httpmonitor"))
     }
 }
 ```
@@ -171,4 +171,4 @@ JitPack builds the tag on the first request for that version — there is nothin
 The published version is the tag name (JitPack passes it to the build as `$VERSION`); keep the
 fallback `version` in `httpmonitor/build.gradle.kts` in step with it so local publishing matches.
 Build logs for a tag are at
-<https://jitpack.io/com/github/azizimusa/AntooSpector/http-monitor/1.1.0/build.log>.
+<https://jitpack.io/com/github/azizimusa/AntooSpector/1.1.0/build.log>.
