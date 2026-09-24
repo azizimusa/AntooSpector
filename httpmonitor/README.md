@@ -4,28 +4,22 @@ In-app HTTP traffic monitor for Android: captures OkHttp and `HttpURLConnection`
 shows them in a built-in viewer (request/response headers, formatted JSON/XML bodies, timings,
 copy-as-cURL).
 
-- Group / artifact: `gg.padu:http-monitor:1.0.0`
+- Group / artifact: `com.github.azizimusa.AntooSpector:http-monitor:1.0.0`
 - `minSdk` 24, Java 11, Kotlin
 - Depends on OkHttp 4.x (`api`), AppCompat and RecyclerView
 
 ## Add it to another app
 
-### Option A — Maven Local (quickest)
+### Option A — JitPack (published releases)
 
-Publish from this project:
-
-```bash
-./gradlew :httpmonitor:publishToMavenLocal
-```
-
-Then in the consuming project's `settings.gradle.kts`:
+Add the JitPack repository in the consuming project's `settings.gradle.kts`:
 
 ```kotlin
 dependencyResolutionManagement {
     repositories {
-        mavenLocal()
         google()
         mavenCentral()
+        maven { url = uri("https://jitpack.io") }
     }
 }
 ```
@@ -34,15 +28,29 @@ and in the app module:
 
 ```kotlin
 dependencies {
-    debugImplementation("gg.padu:http-monitor:1.0.0")
+    debugImplementation("com.github.azizimusa.AntooSpector:http-monitor:1.0.0")
 }
 ```
 
-### Option B — a shared/checked-in Maven repository
+The version is the git tag. JitPack builds the tag on first request, so the very first
+resolution of a new version can take a couple of minutes.
+
+### Option B — Maven Local (while iterating)
+
+Publish from this project:
+
+```bash
+./gradlew :httpmonitor:publishToMavenLocal
+```
+
+Then add `mavenLocal()` to the consuming project's repositories and depend on the same
+coordinates as above.
+
+### Option C — a shared/checked-in Maven repository
 
 ```bash
 ./gradlew :httpmonitor:publishReleasePublicationToLocalRepoRepository
-# artifacts land in build/repo/gg/padu/http-monitor/1.0.0/
+# artifacts land in build/repo/com/github/azizimusa/AntooSpector/http-monitor/1.0.0/
 ```
 
 Copy that directory anywhere (a shared drive, another repo, an S3 bucket, an internal Maven
@@ -54,14 +62,14 @@ repositories {
 }
 ```
 
-### Option C — composite build (no publishing while iterating)
+### Option D — composite build (no publishing at all)
 
 In the consuming project's `settings.gradle.kts`:
 
 ```kotlin
 includeBuild("/Users/you/AndroidStudioProjects/Paduke") {
     dependencySubstitution {
-        substitute(module("gg.padu:http-monitor")).using(project(":httpmonitor"))
+        substitute(module("com.github.azizimusa.AntooSpector:http-monitor")).using(project(":httpmonitor"))
     }
 }
 ```
@@ -153,5 +161,14 @@ away entirely in release.
 
 ## Releasing a new version
 
-Bump `version` in `httpmonitor/build.gradle.kts`, then publish with one of the commands above.
-Run `./gradlew :httpmonitor:testDebugUnitTest :httpmonitor:lintDebug` first.
+Run `./gradlew :httpmonitor:testDebugUnitTest :httpmonitor:lintDebug` first, then:
+
+```bash
+git tag 1.1.0 && git push origin 1.1.0
+```
+
+JitPack builds the tag on the first request for that version — there is nothing to upload.
+The published version is the tag name (JitPack passes it to the build as `$VERSION`); keep the
+fallback `version` in `httpmonitor/build.gradle.kts` in step with it so local publishing matches.
+Build logs for a tag are at
+<https://jitpack.io/com/github/azizimusa/AntooSpector/http-monitor/1.1.0/build.log>.

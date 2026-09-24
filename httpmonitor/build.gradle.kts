@@ -47,9 +47,13 @@ dependencies {
 publishing {
     publications {
         register<MavenPublication>("release") {
-            groupId = "gg.padu"
+            // JitPack serves a multi-module repo as com.github.<user>.<repo>:<artifactId>,
+            // so the group has to spell out the GitHub coordinates to be resolvable.
+            groupId = "com.github.azizimusa.AntooSpector"
             artifactId = "http-monitor"
-            version = "1.0.0"
+            // JitPack exports the tag it is building as $VERSION; the fallback keeps
+            // local publishing working. Keep it in step with the git tag.
+            version = System.getenv("VERSION") ?: "1.0.0"
 
             afterEvaluate { from(components["release"]) }
 

@@ -1,0 +1,7 @@
+# JitPack build settings for the :httpmonitor library.
+# The gradlew launcher runs on 17; Gradle then provisions the JDK named by
+# gradle/gradle-daemon-jvm.properties (25) for the daemon itself.
+jdk:
+  - openjdk17
+install:
+  - ./gradlew :httpmonitor:publishToMavenLocal
