@@ -410,11 +410,11 @@ DeviceControl
 - **It only answers while a screen is up.** With no Activity in the foreground there is nothing to
   capture, and the device says so; the dashboard shows the request as failed rather than hanging.
 - **Quietly, and cheaply.** A background daemon thread polls for a request every few seconds and
-  uploads a downscaled JPEG (longest side 720px by default) when one is asked for. Its own polls
+  uploads a downscaled JPEG (longest side 1080px by default) when one is asked for. Its own polls
   and uploads are never themselves captured.
 
-Tunable on `DeviceControl.from(…)`: `pollIntervalMs` (3 s), `maxDimension` (720), `jpegQuality`
-(60), and `client` to supply your own `OkHttpClient`. Call `stop()` to unregister and release the
+Tunable on `DeviceControl.from(…)`: `pollIntervalMs` (3 s), `maxDimension` (1080), `jpegQuality`
+(85), and `client` to supply your own `OkHttpClient`. Call `stop()` to unregister and release the
 thread. Guard the `start()` the way you guard `report(…)` so it never runs in a release build.
 
 ## Redacting and filtering

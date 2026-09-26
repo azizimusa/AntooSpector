@@ -194,10 +194,16 @@ class DeviceControl private constructor(
 
         const val DEFAULT_POLL_INTERVAL_MS = 3_000L
 
-        /** The longest side of an uploaded screenshot; clear, not crisp. */
-        const val DEFAULT_MAX_DIMENSION = 720
+        /**
+         * The longest side of an uploaded screenshot. 1080 keeps a phone screen
+         * legible — text stays sharp — while still downscaling most panels; raise
+         * it toward the device's own height for a pixel-exact capture, at the cost
+         * of a larger upload.
+         */
+        const val DEFAULT_MAX_DIMENSION = 1080
 
-        const val DEFAULT_JPEG_QUALITY = 60
+        /** JPEG quality of the upload. 85 is clean for UI and text without the bloat of 100. */
+        const val DEFAULT_JPEG_QUALITY = 85
 
         private const val CAPTURE_TIMEOUT_MS = 4_000L
         private const val TAG = "DeviceControl"
