@@ -54,7 +54,7 @@ publishing {
             artifactId = "AntooSpector"
             // JitPack exports the tag it is building as $VERSION; the fallback keeps
             // local publishing working. Keep it in step with the git tag.
-            version = System.getenv("VERSION") ?: "1.2.0"
+            version = System.getenv("VERSION") ?: "1.3.0"
 
             afterEvaluate { from(components["release"]) }
 
