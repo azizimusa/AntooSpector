@@ -9,7 +9,7 @@ Optionally it also ships what it captures to an [Antoo Spector dashboard](#send-
 so you can watch a tester's device from your desk.
 
 - Artifact: `com.github.azizimusa:AntooSpector`
-- `minSdk` 24 · Java 11 · Kotlin
+- `minSdk` 24 · Java 11 · written in Kotlin, [usable from Java](#using-it-from-a-java-project)
 - Depends on OkHttp 4.x (exposed as `api`), AppCompat, RecyclerView
 
 ---
@@ -44,6 +44,8 @@ See [Keeping it out of release builds](#keeping-it-out-of-release-builds).
 
 Other ways to consume it (Maven Local, a shared Maven repo, a composite build) are in
 [Other ways to depend on it](#other-ways-to-depend-on-it).
+
+Using this from a Java-only project? See [Using it from a Java project](#using-it-from-a-java-project) — no Kotlin plugin needed, but the module must compile against Java 11.
 
 ## 2. Start the monitor
 
@@ -232,6 +234,114 @@ Two things together do it:
 
 If the only code that touches `HttpMonitor` / `HttpMonitorInterceptor` lives in debug-only
 sources, the whole thing compiles away in release.
+
+## Using it from a Java project
+
+The library is written in Kotlin, but it ships as an ordinary AAR — a Java-only Android
+project can use it **without adding the Kotlin Gradle plugin**. The Kotlin standard library
+is declared as a dependency of the artifact, so Gradle pulls it in for you.
+
+Two requirements on the consuming module:
+
+```kotlin
+android {
+    defaultConfig {
+        minSdk = 24                                       // or higher
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11      // the AAR is Java 11 bytecode
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+}
+```
+
+Java 8 will not work; the library targets 11.
+
+### Calling it from Java
+
+Kotlin `object`s are reached through their `INSTANCE` field, and Kotlin's default arguments
+don't exist in Java — so `start(…)` takes both parameters explicitly:
+
+```java
+import gg.padu.httpmonitor.HeaderRedactingFilter;
+import gg.padu.httpmonitor.HttpMonitor;
+
+public class MyApp extends Application {
+    @Override public void onCreate() {
+        super.onCreate();
+        if (!BuildConfig.DEBUG) return;
+
+        HttpMonitor.INSTANCE
+                .start(500, 512 * 1024)   // maxTransactions, maxBodyBytes — both required
+                .addFilter(new HeaderRedactingFilter("Authorization", "Cookie", "Set-Cookie"));
+    }
+}
+```
+
+Instrumenting a client, and opening the viewer:
+
+```java
+import gg.padu.httpmonitor.okhttp.HttpMonitorInterceptor;
+import gg.padu.httpmonitor.urlconnection.UrlInstrument;
+
+OkHttpClient client = new OkHttpClient.Builder()
+        .addInterceptor(new HttpMonitorInterceptor())
+        .build();
+
+HttpURLConnection connection =
+        (HttpURLConnection) UrlInstrument.openConnection(new URL("https://example.com"));
+
+HttpMonitor.INSTANCE.show(context);
+```
+
+`HttpFilter` compiles to real JVM default methods, so an anonymous class only has to override
+the method it cares about. Returning `null` still drops the transaction:
+
+```java
+import gg.padu.httpmonitor.HttpFilter;
+import gg.padu.httpmonitor.HttpRequest;
+
+HttpMonitor.INSTANCE.addFilter(new HttpFilter() {
+    @Override public HttpRequest filter(HttpRequest request) {
+        return request.getUrl().contains("/auth/") ? null : request;
+    }
+});
+```
+
+Dashboard reporting works the same way — `DeviceInfo.from(…)` is a static method and
+`AntooReporter`'s optional parameters have Java overloads:
+
+```java
+import gg.padu.httpmonitor.report.AntooReporter;
+import gg.padu.httpmonitor.report.DeviceInfo;
+
+HttpMonitor.INSTANCE.report(
+        new AntooReporter(
+                BuildConfig.ANTOO_ENDPOINT,
+                BuildConfig.ANTOO_KEY,
+                DeviceInfo.from(this)));
+```
+
+`TransactionStore.Listener` is a single-method interface, so a Java lambda works:
+
+```java
+HttpMonitor.INSTANCE.addListener(transactions ->
+        Log.d("Monitor", transactions.size() + " captured"));
+```
+
+### Java quick reference
+
+| Kotlin | Java |
+| --- | --- |
+| `HttpMonitor.start(500)` | `HttpMonitor.INSTANCE.start(500, 512 * 1024)` |
+| `HttpMonitor.show(context)` | `HttpMonitor.INSTANCE.show(context)` |
+| `Bodies.asCurl(transaction)` | `Bodies.INSTANCE.asCurl(transaction)` |
+| `UrlInstrument.openConnection(url)` | `UrlInstrument.openConnection(url)` (static) |
+| `DeviceInfo.from(context)` | `DeviceInfo.from(context)` (static) |
+| `transaction.request.url` | `transaction.getRequest().getUrl()` |
+
+Everything else — `HttpMonitorInterceptor`, `AntooReporter`, `DeviceInfo`, `HeaderRedactingFilter` —
+is constructed with `new` as usual.
 
 ## API reference
 
