@@ -25,4 +25,11 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="24dp"
         android:text="@string/http_monitor_title" />
+
+    <Button
+        android:id="@+id/showDialog"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Show dialog" />
 </LinearLayout>

@@ -31,6 +31,14 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.sendOkHttp).setOnClickListener { sendWithOkHttp() }
         findViewById<Button>(R.id.sendUrlConnection).setOnClickListener { sendWithUrlConnection() }
         findViewById<Button>(R.id.openMonitor).setOnClickListener { HttpMonitor.show(this) }
+        findViewById<Button>(R.id.showDialog).setOnClickListener {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Delete this install?")
+                .setMessage("A dialog is its own window over the activity. Device Control captures it too.")
+                .setPositiveButton("Delete", null)
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
     }
 
     private fun sendWithOkHttp() = io.execute {
