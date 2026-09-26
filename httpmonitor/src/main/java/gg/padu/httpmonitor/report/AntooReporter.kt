@@ -43,7 +43,15 @@ class AntooReporter @JvmOverloads constructor(
     private val flushIntervalMs: Long = DEFAULT_FLUSH_INTERVAL_MS,
     private val queueCapacity: Int = DEFAULT_QUEUE_CAPACITY,
     private val maxBodyChars: Int = DEFAULT_MAX_BODY_CHARS,
-    private val client: OkHttpClient = defaultClient()
+    private val client: OkHttpClient = defaultClient(),
+    /**
+     * How stale contact may get before the reporter says it is still here. An
+     * empty batch is that statement — the smallest thing the dashboard accepts —
+     * and it rides the flush the reporter already wakes for, so an idle app costs
+     * one short POST per interval and no extra wake-ups. Zero turns it off, and
+     * the dashboard then judges a device by the last traffic it captured.
+     */
+    private val heartbeatIntervalMs: Long = flushIntervalMs
 ) : TransactionReporter {
 
     private val lock = Any()
@@ -54,6 +62,9 @@ class AntooReporter @JvmOverloads constructor(
     /** Guarded by [lock]; backs off the upload thread after repeated failures. */
     private var consecutiveFailures = 0
     private var nextAttemptAt = 0L
+
+    /** Guarded by [lock]; when the dashboard last heard anything from us. */
+    private var lastContactAt = 0L
 
     private val executor: ScheduledExecutorService =
         Executors.newSingleThreadScheduledExecutor { runnable ->
@@ -103,14 +114,15 @@ class AntooReporter @JvmOverloads constructor(
 
         while (true) {
             val batch = synchronized(lock) {
-                if (queue.isEmpty()) return
-                List(minOf(batchSize, queue.size)) { queue.removeFirst() }
-            }
+                if (queue.isEmpty()) null
+                else List(minOf(batchSize, queue.size)) { queue.removeFirst() }
+            } ?: break
 
             when (send(batch)) {
                 Outcome.SENT -> synchronized(lock) {
                     consecutiveFailures = 0
                     nextAttemptAt = 0L
+                    lastContactAt = System.currentTimeMillis()
                 }
 
                 // Keep the batch, at the front, and stop until the backoff expires.
@@ -132,6 +144,31 @@ class AntooReporter @JvmOverloads constructor(
                 Outcome.DROP -> synchronized(lock) { consecutiveFailures = 0 }
             }
         }
+
+        beat()
+    }
+
+    /**
+     * Tells the dashboard the app is still running when there is no traffic to
+     * report, so a quiet device reads as online rather than gone. Sent only once
+     * contact has gone stale, and never instead of a batch — a batch says the
+     * same thing and carries data with it.
+     */
+    private fun beat() {
+        if (heartbeatIntervalMs <= 0) return
+
+        val now = System.currentTimeMillis()
+        val due = synchronized(lock) {
+            now >= nextAttemptAt && now - lastContactAt >= heartbeatIntervalMs
+        }
+        if (!due) return
+
+        // A failed heartbeat is not data lost, so it neither retries nor backs
+        // off: the next interval comes round soon enough.
+        val outcome = send(emptyList())
+        synchronized(lock) {
+            lastContactAt = if (outcome == Outcome.SENT) now else now - heartbeatIntervalMs / 2
+        }
     }
 
     private fun send(batch: List<HttpTransaction>): Outcome {
@@ -151,6 +188,8 @@ class AntooReporter @JvmOverloads constructor(
             return Outcome.DROP
         }
 
+        val what = if (batch.isEmpty()) "heartbeat" else "batch of ${batch.size}"
+
         val request = Request.Builder()
             .url(endpoint)
             .header("X-Antoo-Key", apiKey)
@@ -163,13 +202,13 @@ class AntooReporter @JvmOverloads constructor(
                     response.isSuccessful -> Outcome.SENT
                     response.code == 429 || response.code >= 500 -> Outcome.RETRY
                     else -> {
-                        Log.w(TAG, "Dashboard refused a batch of ${batch.size}: HTTP ${response.code}")
+                        Log.w(TAG, "Dashboard refused a $what: HTTP ${response.code}")
                         Outcome.DROP
                     }
                 }
             }
         } catch (error: IOException) {
-            Log.d(TAG, "Upload failed, will retry: ${error.message}")
+            Log.d(TAG, "Sending a $what failed: ${error.message}")
             Outcome.RETRY
         }
     }
@@ -186,6 +225,9 @@ class AntooReporter @JvmOverloads constructor(
 
         /** Bodies are capped well below the server's limit; this rides mobile data. */
         const val DEFAULT_MAX_BODY_CHARS = 16_384
+
+        /** Turns heartbeats off, so only captured traffic marks a device alive. */
+        const val HEARTBEAT_OFF = 0L
 
         private const val MAX_BACKOFF_MS = 5 * 60_000L
         private const val MAX_BACKOFF_SHIFT = 5

@@ -41,14 +41,17 @@ class AntooReporterTest {
     private fun reporter(
         batchSize: Int = 50,
         flushIntervalMs: Long = 60_000L,
-        queueCapacity: Int = 500
+        queueCapacity: Int = 500,
+        // Off unless a case is about them, so a quiet reporter stays quiet here.
+        heartbeatIntervalMs: Long = AntooReporter.HEARTBEAT_OFF
     ) = AntooReporter(
         endpoint = endpoint,
         apiKey = "antoo_test_key",
         device = device,
         batchSize = batchSize,
         flushIntervalMs = flushIntervalMs,
-        queueCapacity = queueCapacity
+        queueCapacity = queueCapacity,
+        heartbeatIntervalMs = heartbeatIntervalMs
     ).also { reporter = it }
 
     private fun transaction(id: Long, url: String = "https://api.example.com/v1/feed") =
@@ -191,6 +194,51 @@ class AntooReporterTest {
         reporter.report(transaction(1))
         reporter.flush()
 
+        assertNull(take(timeoutMs = 500))
+    }
+
+    @Test
+    fun `an idle reporter says it is still here`() {
+        server.enqueue(MockResponse().setResponseCode(202))
+        val reporter = reporter(heartbeatIntervalMs = 50L)
+
+        // Nothing captured, so the only thing to send is the fact of being alive.
+        reporter.flush()
+
+        val beat = take()
+        assertNotNull(beat)
+        assertEquals("POST", beat!!.method)
+        assertEquals("antoo_test_key", beat.getHeader("X-Antoo-Key"))
+
+        val json = beat.json()
+        assertEquals(0, json.getJSONArray("transactions").length())
+        assertEquals("install-1", json.getJSONObject("device").getString("uid"))
+        // Short enough to be worth sending every interval.
+        assertTrue("heartbeat was ${beat.bodySize} bytes", beat.bodySize < 300)
+    }
+
+    @Test
+    fun `heartbeats can be turned off`() {
+        val reporter = reporter(heartbeatIntervalMs = AntooReporter.HEARTBEAT_OFF)
+
+        reporter.flush()
+
+        assertNull(take(timeoutMs = 500))
+    }
+
+    @Test
+    fun `a batch counts as saying it is still here`() {
+        server.enqueue(accepted())
+        val reporter = reporter(heartbeatIntervalMs = 60_000L)
+
+        reporter.report(transaction(1))
+        reporter.flush()
+
+        val batch = take()
+        assertEquals(1, batch!!.json().getJSONArray("transactions").length())
+
+        // The batch is contact enough; no heartbeat chases it.
+        reporter.flush()
         assertNull(take(timeoutMs = 500))
     }
 }

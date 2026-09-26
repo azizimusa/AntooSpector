@@ -317,7 +317,19 @@ with `if (BuildConfig.ANTOO_ENDPOINT.isNotEmpty() && BuildConfig.ANTOO_KEY.isNot
 - The reporter's own uploads are never themselves captured.
 
 Tunable constructor parameters: `batchSize` (50), `flushIntervalMs` (15 s), `queueCapacity` (500),
-`maxBodyChars` (16 384), and `client` if you want to supply your own `OkHttpClient`.
+`maxBodyChars` (16 384), `client` if you want to supply your own `OkHttpClient`, and
+`heartbeatIntervalMs` (defaults to `flushIntervalMs`).
+
+### Online status
+
+The dashboard shows each device as online or offline, and it can only know that if the client
+keeps saying so. When a flush comes round with nothing queued, the reporter posts an **empty
+batch** — a heartbeat. It rides the wake-up the reporter already schedules, so an idle app costs
+one short POST per interval and no extra timers, alarms or wake locks. Contact of any kind counts,
+so a device sending traffic never also sends a heartbeat.
+
+Pass `heartbeatIntervalMs = AntooReporter.HEARTBEAT_OFF` to stop them; the dashboard then judges a
+device by the last traffic it captured, which reads as offline whenever the app is merely quiet.
 
 `HttpMonitor.flushReports()` pushes what's queued right now; `HttpMonitor.report(null)` stops
 reporting and releases the thread.
