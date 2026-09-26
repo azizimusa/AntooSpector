@@ -32,10 +32,12 @@ import java.util.concurrent.atomic.AtomicReference
  *  - **screenshot** — [ScreenCapture] reads the foreground Activity's own
  *    surface, which is always the app's to read, so nothing is prompted and
  *    nothing beyond the app is seen.
- *  - **tap** — [RemoteInput] delivers a touch to the window under a point on the
- *    last screenshot, then a fresh screenshot goes back as that tap's answer, so
- *    the dashboard shows what the tap did. Also permission-free, and also
- *    limited to the app: the system UI and other apps are not this app's windows.
+ *  - **tap**, **key** and **text** — [RemoteInput] delivers a touch to the window
+ *    under a point on the last screenshot, a key press (Back, Enter, Backspace)
+ *    to the focused window, or typed text into whatever holds focus. Each answers
+ *    with a fresh screenshot, so the dashboard shows what it did. Also
+ *    permission-free, and also limited to the app: the system UI, Home, Recents
+ *    and other apps are not this app's windows.
  *
  * An install with no Activity in the foreground has nothing to capture or tap and
  * says so.
@@ -169,6 +171,8 @@ class DeviceControl private constructor(
             when (command.type) {
                 ControlProtocol.TYPE_SCREENSHOT -> runScreenshot(command.id)
                 ControlProtocol.TYPE_TAP -> runTap(command)
+                ControlProtocol.TYPE_KEY -> runKey(command)
+                ControlProtocol.TYPE_TEXT -> runText(command)
                 else -> reportFailure(command.id, "Unsupported command: ${command.type}")
             }
         }
@@ -190,40 +194,69 @@ class DeviceControl private constructor(
     }
 
     /**
-     * A tap, answered with a screenshot of what it did. The command carries the
-     * image back itself: a tap whose result you cannot see is not much use, and
-     * pairing it with a separate screenshot command would race the app's own
-     * reaction.
+     * A tap, answered with a screenshot of what it did.
      */
     private fun runTap(command: ControlProtocol.Command) {
-        val activity = foreground.get().get()
-        if (activity == null) {
-            reportFailure(command.id, "No screen is in the foreground.")
-            return
-        }
-
         val tap = ControlProtocol.parseTap(command.params)
         if (tap == null) {
             reportFailure(command.id, "The tap had no usable coordinates.")
             return
         }
 
-        val landed = runCatching { input.tap(activity, tap, TAP_TIMEOUT_MS) }.getOrDefault(false)
-        if (!landed) {
-            reportFailure(command.id, "The tap could not be delivered to the app's window.")
+        act(command, "tap") { activity -> input.tap(activity, tap, INPUT_TIMEOUT_MS) }
+    }
+
+    /** One key press — Back, Enter, Backspace — on the app's focused window. */
+    private fun runKey(command: ControlProtocol.Command) {
+        val keyCode = ControlProtocol.parseKey(command.params)
+        if (keyCode == null) {
+            reportFailure(command.id, "That key is not one this app can press.")
             return
         }
 
-        // Let the app react before looking: a tap that opens a screen or a dialog
-        // needs a frame or two, and a screenshot taken mid-transition shows
-        // neither where it was nor where it went.
+        act(command, "key press") { activity -> input.key(activity, keyCode, INPUT_TIMEOUT_MS) }
+    }
+
+    /** Text typed into whatever has focus, as key strokes rather than through an IME. */
+    private fun runText(command: ControlProtocol.Command) {
+        val text = ControlProtocol.parseText(command.params)
+        if (text == null) {
+            reportFailure(command.id, "There was no text to type.")
+            return
+        }
+
+        act(command, "text") { activity -> input.text(activity, text, INPUT_TIMEOUT_MS) }
+    }
+
+    /**
+     * Every interactive command runs the same way: do it to the app, let the app
+     * react, then answer with a screenshot of what it produced. The command
+     * carries the image back itself — an action whose result you cannot see is
+     * not much use, and a separate screenshot command would race the reaction.
+     */
+    private fun act(command: ControlProtocol.Command, name: String, perform: (Activity) -> Boolean) {
+        val activity = foreground.get().get()
+        if (activity == null) {
+            reportFailure(command.id, "No screen is in the foreground.")
+            return
+        }
+
+        val landed = runCatching { perform(activity) }.getOrDefault(false)
+        if (!landed) {
+            reportFailure(command.id, "The $name could not be delivered to the app's window.")
+            return
+        }
+
+        // Let the app react before looking: an action that opens a screen or a
+        // dialog needs a frame or two, and a screenshot taken mid-transition
+        // shows neither where it was nor where it went.
         runCatching { Thread.sleep(tapSettleMs) }
 
         val shot = grab()
         if (shot == null) {
             // Said plainly, because the two halves failed differently: the app did
-            // get the tap, so the dashboard must not offer to send it again.
-            reportFailure(command.id, "The tap landed, but the screen could not be captured.")
+            // get the $name, so the dashboard must not offer to send it again.
+            reportFailure(command.id, "The $name landed, but the screen could not be captured.")
             return
         }
 
@@ -307,7 +340,7 @@ class DeviceControl private constructor(
         const val DEFAULT_JPEG_QUALITY = 85
 
         private const val CAPTURE_TIMEOUT_MS = 4_000L
-        private const val TAP_TIMEOUT_MS = 2_000L
+        private const val INPUT_TIMEOUT_MS = 2_000L
 
         /** Quiet for this long after the last command and the loop idles again. */
         private const val BUSY_WINDOW_MS = 20_000L

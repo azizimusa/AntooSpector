@@ -1,5 +1,6 @@
 package gg.padu.httpmonitor.control
 
+import android.view.KeyEvent
 import org.json.JSONObject
 
 /**
@@ -16,6 +17,32 @@ internal object ControlProtocol {
 
     const val TYPE_SCREENSHOT = "screenshot"
     const val TYPE_TAP = "tap"
+    const val TYPE_KEY = "key"
+    const val TYPE_TEXT = "text"
+
+    /**
+     * The keys the dashboard may press, by name. A short list on purpose: these
+     * are the ones an app's own window can act on. Home and Recents are the
+     * system's, not the app's, and no amount of dispatching inside the process
+     * reaches them.
+     */
+    private val KEYS = mapOf(
+        "back" to KeyEvent.KEYCODE_BACK,
+        "enter" to KeyEvent.KEYCODE_ENTER,
+        "del" to KeyEvent.KEYCODE_DEL,
+        "tab" to KeyEvent.KEYCODE_TAB,
+        "escape" to KeyEvent.KEYCODE_ESCAPE,
+        "space" to KeyEvent.KEYCODE_SPACE,
+        "search" to KeyEvent.KEYCODE_SEARCH,
+        "menu" to KeyEvent.KEYCODE_MENU,
+        "up" to KeyEvent.KEYCODE_DPAD_UP,
+        "down" to KeyEvent.KEYCODE_DPAD_DOWN,
+        "left" to KeyEvent.KEYCODE_DPAD_LEFT,
+        "right" to KeyEvent.KEYCODE_DPAD_RIGHT
+    )
+
+    /** As much text as one command carries; past this it is a paste, not typing. */
+    const val MAX_TEXT_LENGTH = 500
 
     /** A spot on the last screenshot, and how long to hold it there. */
     data class Tap(val x: Float, val y: Float, val holdMs: Long)
@@ -77,6 +104,19 @@ internal object ControlProtocol {
         val hold = params.optLong("hold_ms", DEFAULT_TAP_HOLD_MS).coerceIn(0L, MAX_TAP_HOLD_MS)
 
         return Tap(x.toFloat(), y.toFloat(), hold)
+    }
+
+    /** The key code a named key stands for, or null for a name we do not press. */
+    fun parseKey(params: JSONObject): Int? = KEYS[params.optString("key").trim().lowercase()]
+
+    /**
+     * The text to type. Empty is refused rather than treated as a no-op: it would
+     * cost a round trip and a screenshot to change nothing.
+     */
+    fun parseText(params: JSONObject): String? {
+        val text = params.optString("text")
+
+        return if (text.isEmpty() || text.length > MAX_TEXT_LENGTH) null else text
     }
 
     private fun encode(value: String): String =

@@ -1,5 +1,6 @@
 package gg.padu.httpmonitor.control
 
+import android.view.KeyEvent
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -137,5 +138,56 @@ class ControlProtocolTest {
         assertEquals(2, commands.size)
         assertEquals(ControlProtocol.TYPE_TAP, commands[0].type)
         assertEquals(ControlProtocol.TYPE_SCREENSHOT, commands[1].type)
+    }
+
+    @Test
+    fun `named keys map to the codes the app can press`() {
+        assertEquals(KeyEvent.KEYCODE_BACK, ControlProtocol.parseKey(JSONObject("""{"key":"back"}""")))
+        assertEquals(KeyEvent.KEYCODE_ENTER, ControlProtocol.parseKey(JSONObject("""{"key":"enter"}""")))
+        assertEquals(KeyEvent.KEYCODE_DEL, ControlProtocol.parseKey(JSONObject("""{"key":"del"}""")))
+        // Case and stray spacing are the dashboard's business, not a refusal.
+        assertEquals(KeyEvent.KEYCODE_BACK, ControlProtocol.parseKey(JSONObject("""{"key":" BACK "}""")))
+    }
+
+    @Test
+    fun `a key the app cannot press is refused`() {
+        // Home and Recents belong to the system; no dispatch inside the app reaches them.
+        assertNull(ControlProtocol.parseKey(JSONObject("""{"key":"home"}""")))
+        assertNull(ControlProtocol.parseKey(JSONObject("""{"key":""}""")))
+        assertNull(ControlProtocol.parseKey(JSONObject("{}")))
+    }
+
+    @Test
+    fun `text to type is read as given`() {
+        assertEquals("Hello, world", ControlProtocol.parseText(JSONObject("""{"text":"Hello, world"}""")))
+    }
+
+    @Test
+    fun `empty text is refused rather than costing a round trip`() {
+        assertNull(ControlProtocol.parseText(JSONObject("""{"text":""}""")))
+        assertNull(ControlProtocol.parseText(JSONObject("{}")))
+    }
+
+    @Test
+    fun `text past the limit is refused, not truncated`() {
+        val long = "a".repeat(ControlProtocol.MAX_TEXT_LENGTH + 1)
+
+        assertNull(ControlProtocol.parseText(JSONObject().put("text", long)))
+        assertEquals(
+            ControlProtocol.MAX_TEXT_LENGTH,
+            ControlProtocol.parseText(JSONObject().put("text", "a".repeat(ControlProtocol.MAX_TEXT_LENGTH)))?.length
+        )
+    }
+
+    @Test
+    fun `key and text commands parse like any other`() {
+        val commands = ControlProtocol.parseCommands(
+            """{"commands":[{"id":5,"type":"key","params":{"key":"back"}},{"id":6,"type":"text","params":{"text":"hi"}}]}"""
+        )
+
+        assertEquals(ControlProtocol.TYPE_KEY, commands[0].type)
+        assertEquals("back", commands[0].params.optString("key"))
+        assertEquals(ControlProtocol.TYPE_TEXT, commands[1].type)
+        assertEquals("hi", commands[1].params.optString("text"))
     }
 }

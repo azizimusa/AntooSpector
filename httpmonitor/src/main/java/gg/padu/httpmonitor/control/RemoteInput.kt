@@ -3,6 +3,8 @@ package gg.padu.httpmonitor.control
 import android.app.Activity
 import android.os.SystemClock
 import android.view.InputDevice
+import android.view.KeyCharacterMap
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import java.util.concurrent.CountDownLatch
@@ -10,15 +12,19 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Plays a tap back onto the app's own UI.
+ * Plays taps, key presses and typed text back onto the app's own UI.
  *
- * The dashboard points at a spot on a screenshot; this turns that spot into the
- * down/up pair a finger would have produced and hands it to the window actually
- * under it — the Activity, or whatever dialog or popup sits over it. The events
- * go into this process's own view tree, which is the app's to touch, so nothing
- * is prompted and **no permission is involved**. It is also the limit of the
- * feature: the system UI, the keyboard and other apps are out of reach by
+ * The dashboard points at a spot on a screenshot, or names a key, or hands over a
+ * line of text; this turns each into the events a finger or a keyboard would have
+ * produced and hands them to the window they belong to — the Activity, or
+ * whatever dialog or popup sits over it. The events go into this process's own
+ * view tree, which is the app's to touch, so nothing is prompted and **no
+ * permission is involved**. It is also the limit of the feature: the system UI,
+ * the notification shade, Home and Recents, and other apps are out of reach by
  * construction, because they are not this app's windows.
+ *
+ * Typed text goes in as key events, not through the on-screen keyboard, so it
+ * lands in whatever has focus whether or not an IME is up.
  *
  * Coordinates arrive as fractions of the screenshot rather than pixels, so the
  * dashboard never has to know what the device downscaled the image to.
@@ -66,6 +72,135 @@ internal class RemoteInput {
 
         val done = latch.await(timeoutMs + tap.holdMs, TimeUnit.MILLISECONDS)
         return done && delivered.get()
+    }
+
+    /**
+     * Presses one key and releases it. Back is the reason this exists: it is the
+     * app's own navigation, and the only way to walk out of a screen from the
+     * dashboard.
+     */
+    fun key(activity: Activity, keyCode: Int, timeoutMs: Long): Boolean =
+        onUiThread(activity, timeoutMs) { target ->
+            press(target, keyCode)
+        }
+
+    /**
+     * Types text into whatever has focus.
+     *
+     * [KeyCharacterMap] turns the string into the key strokes a keyboard would
+     * have sent, which is what an EditText, a Compose field and a WebView all
+     * understand. A character no virtual key produces — an emoji, most non-Latin
+     * script — has no such stroke, and goes in as one text event instead, which
+     * editable views commit whole.
+     */
+    fun text(activity: Activity, text: String, timeoutMs: Long): Boolean =
+        onUiThread(activity, timeoutMs) { target ->
+            val strokes = runCatching {
+                KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD).getEvents(text.toCharArray())
+            }.getOrNull()
+
+            if (strokes == null || strokes.isEmpty()) commit(target, text) else type(target, strokes)
+        }
+
+    /** The down/up pair of one key press. */
+    private fun press(target: View, keyCode: Int): Boolean {
+        val downTime = SystemClock.uptimeMillis()
+        val down = key(downTime, downTime, KeyEvent.ACTION_DOWN, keyCode, 0, 0, 0)
+
+        if (!send(target, down)) return false
+
+        // FLAG_TRACKING is set by the framework on an up whose down was tracked,
+        // and Activity and Dialog both refuse to act on Back without it. Nothing
+        // sets it for us here, because dispatching straight into the view tree
+        // skips the ViewRootImpl that would have.
+        val up = key(downTime, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, keyCode, 0, 0, KeyEvent.FLAG_TRACKING)
+
+        return send(target, up)
+    }
+
+    /** Replays a keyboard's strokes with times of our own, so they read as now. */
+    private fun type(target: View, strokes: Array<KeyEvent>): Boolean {
+        // An up must carry the down time of its own key, or a view pairing them
+        // sees a stroke that was never pressed.
+        val downTimes = mutableMapOf<Int, Long>()
+
+        return strokes.all { stroke ->
+            val now = SystemClock.uptimeMillis()
+            val downTime = if (stroke.action == KeyEvent.ACTION_DOWN) {
+                now.also { downTimes[stroke.keyCode] = it }
+            } else {
+                downTimes[stroke.keyCode] ?: now
+            }
+
+            send(target, key(downTime, now, stroke.action, stroke.keyCode, stroke.metaState, stroke.scanCode, 0))
+        }
+    }
+
+    /** Text that no key stroke spells, handed over whole for a view to commit. */
+    private fun commit(target: View, text: String): Boolean {
+        val now = SystemClock.uptimeMillis()
+        // The one-time constructor: a text event has no press to hold, only a moment.
+        val event = KeyEvent(now, text, KeyCharacterMap.VIRTUAL_KEYBOARD, KeyEvent.FLAG_SOFT_KEYBOARD)
+
+        return send(target, event)
+    }
+
+    private fun key(
+        downTime: Long,
+        eventTime: Long,
+        action: Int,
+        keyCode: Int,
+        metaState: Int,
+        scanCode: Int,
+        extraFlags: Int
+    ): KeyEvent = KeyEvent(
+        downTime,
+        eventTime,
+        action,
+        keyCode,
+        0,
+        metaState,
+        KeyCharacterMap.VIRTUAL_KEYBOARD,
+        scanCode,
+        // Soft keyboard and keep-touch-mode together are what a real IME sends:
+        // without them a view can be dragged out of touch mode and move focus
+        // somewhere the operator never asked for.
+        KeyEvent.FLAG_SOFT_KEYBOARD or KeyEvent.FLAG_KEEP_TOUCH_MODE or extraFlags,
+        InputDevice.SOURCE_KEYBOARD
+    )
+
+    private fun send(target: View, event: KeyEvent): Boolean =
+        runCatching { target.dispatchKeyEvent(event) }.isSuccess
+
+    /**
+     * Runs [action] against the focused window on the UI thread and waits for it.
+     * Keys go where typing goes — the window that holds focus — which is not
+     * always the topmost one a tap would land in.
+     */
+    private fun onUiThread(activity: Activity, timeoutMs: Long, action: (View) -> Boolean): Boolean {
+        val decor = activity.window?.decorView ?: return false
+
+        val latch = CountDownLatch(1)
+        val done = AtomicBoolean(false)
+
+        activity.runOnUiThread {
+            try {
+                done.set(action(focused(decor)))
+            } catch (_: Throwable) {
+                // Left false: the caller reports it as undelivered.
+            } finally {
+                latch.countDown()
+            }
+        }
+
+        return latch.await(timeoutMs, TimeUnit.MILLISECONDS) && done.get()
+    }
+
+    /** The app's focused window, or its topmost one if the framework names none. */
+    private fun focused(decor: View): View {
+        val roots = runCatching { AppWindows.shown() }.getOrNull().orEmpty()
+
+        return roots.lastOrNull { it.hasWindowFocus() } ?: roots.lastOrNull() ?: decor
     }
 
     /**

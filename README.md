@@ -10,7 +10,7 @@ so you can watch a tester's device from your desk.
 
 | | |
 | --- | --- |
-| Artifact | `com.github.azizimusa:AntooSpector:1.4.0` (JitPack) |
+| Artifact | `com.github.azizimusa:AntooSpector:1.5.0` (JitPack) |
 | Requires | `minSdk` 24 · Java 11 · OkHttp 4.x |
 | Language | Kotlin, and [fully usable from Java](#using-it-from-java) — no Kotlin plugin needed |
 
@@ -52,7 +52,7 @@ Then in your **app module's** `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    debugImplementation("com.github.azizimusa:AntooSpector:1.4.0")
+    debugImplementation("com.github.azizimusa:AntooSpector:1.5.0")
 }
 ```
 
@@ -386,11 +386,12 @@ never block, never throw.
 
 ---
 
-## Optional: Device Control — screenshots and taps
+## Optional: Device Control — screenshots, taps, keys and typing
 
 Once a device is reporting to the dashboard, Device Control can ask it for a **screenshot of the
-app's own screen** from the dashboard's `/devicecontrol` page — and **tap that screenshot to tap the
-device**. Start it alongside the reporter, with the same endpoint and key:
+app's own screen** from the dashboard's `/devicecontrol` page — and then **drive that screen**:
+click the screenshot to tap the device, press Back, or type into whatever the app has focused.
+Start it alongside the reporter, with the same endpoint and key:
 
 ```kotlin
 DeviceControl
@@ -407,7 +408,13 @@ DeviceControl
   the image; the device plays it back as an ordinary touch on the window under it — the Activity, or
   a dialog or popup over it — and answers with a fresh screenshot of the screen that tap produced.
   Events go into this app's own view tree, so again **no permission**, and by the same token nothing
-  outside the app can be touched: not the system UI, not the keyboard, not another app.
+  outside the app can be touched: not the system UI, not the notification shade, not another app.
+- **Back and a keyboard, on the same footing.** Back is a real `KEYCODE_BACK` press on the focused
+  window, so it dismisses a dialog or pops a screen exactly as the device's own gesture does. Typed
+  text goes in as key strokes rather than through an IME, so it lands wherever the app has focus
+  whether or not a soft keyboard is up — tap the field first, then type. Both answer with a
+  screenshot too. Home and Recents are *not* offered: they belong to the system, and no dispatch
+  inside a process reaches them.
 - **It captures this app's own window, nothing more.** The image comes from `PixelCopy` on the
   foreground Activity's own surface — content the app already owns — so it needs **no permission**
   and shows the user nothing. There is no capture of the device beyond the app; that is a thing
@@ -584,7 +591,7 @@ httpmonitor/   the library itself
 Run the tests and lint above, then push a tag:
 
 ```bash
-git tag 1.4.0 && git push origin 1.4.0
+git tag 1.5.0 && git push origin 1.5.0
 ```
 
 JitPack builds the tag on the first request for that version — there is nothing to upload. The
@@ -592,4 +599,4 @@ published version is the tag name (JitPack passes it to the build as `$VERSION`)
 fallback `version` in `httpmonitor/build.gradle.kts` in step with it so local publishing matches.
 
 Build logs for a tag are at
-<https://jitpack.io/com/github/azizimusa/AntooSpector/1.4.0/build.log>.
+<https://jitpack.io/com/github/azizimusa/AntooSpector/1.5.0/build.log>.
