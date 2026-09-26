@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Debug builds ship traffic to a plain-http dashboard on the LAN; release
+         builds never do, so cleartext is opened here and not in the main manifest. -->
+    <application android:usesCleartextTraffic="true" />
+
+</manifest>
