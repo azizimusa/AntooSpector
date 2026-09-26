@@ -1,6 +1,17 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
 }
+
+// Dashboard credentials live in local.properties, which is not version-controlled.
+// Absent, the app simply captures locally and ships nothing.
+val local = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use(::load)
+}
+
+fun setting(name: String): String =
+    (local.getProperty(name) ?: System.getenv(name.replace('.', '_').uppercase())).orEmpty()
 
 android {
     namespace = "gg.padu.ke"
@@ -16,6 +27,9 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "ANTOO_ENDPOINT", "\"${setting("antoo.endpoint")}\"")
+        buildConfigField("String", "ANTOO_KEY", "\"${setting("antoo.key")}\"")
     }
 
     buildFeatures {

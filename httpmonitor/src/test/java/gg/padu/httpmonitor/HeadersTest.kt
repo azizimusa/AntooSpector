@@ -32,10 +32,22 @@ class HeadersTest {
 
         headers["authorization"] = "<redacted>"
         assertEquals(listOf("<redacted>"), headers.all("Authorization"))
+        // Rewriting a value must not restyle the name.
+        assertEquals(listOf("Authorization"), headers.names())
 
         headers.remove("Authorization")
         assertFalse(headers.contains("Authorization"))
         assertNull(headers["Authorization"])
+    }
+
+    @Test
+    fun `set on an unseen name uses the casing it was given`() {
+        val headers = Headers()
+
+        headers["X-Trace-Id"] = "abc-123"
+
+        assertEquals(listOf("X-Trace-Id"), headers.names())
+        assertEquals("abc-123", headers["x-trace-id"])
     }
 
     @Test

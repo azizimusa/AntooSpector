@@ -25,7 +25,10 @@ class Headers() : Iterable<Pair<String, String>> {
 
     operator fun set(name: String, value: String) = apply {
         val key = name.lowercase()
-        names[key] = name
+        // Keep whatever casing the header was first seen with: set() is also how a
+        // filter rewrites a value, and redacting "Authorization" should not leave
+        // the name restyled in the viewer and on the wire.
+        names.getOrPut(key) { name }
         values[key] = mutableListOf(value)
     }
 

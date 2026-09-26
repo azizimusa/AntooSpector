@@ -1,9 +1,11 @@
 package gg.padu.httpmonitor
 
+import gg.padu.httpmonitor.report.TransactionReporter
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -19,8 +21,20 @@ class HttpMonitorTest {
     @After
     fun tearDown() {
         filters.forEach { HttpMonitor.removeFilter(it) }
+        HttpMonitor.report(null)
         HttpMonitor.clear()
         HttpMonitor.stop()
+    }
+
+    /** Collects what the monitor hands a reporter, and how often it is flushed. */
+    private class RecordingReporter : TransactionReporter {
+        val reported = mutableListOf<HttpTransaction>()
+        var flushes = 0
+        var closed = false
+
+        override fun report(transaction: HttpTransaction) { reported += transaction }
+        override fun flush() { flushes++ }
+        override fun close() { closed = true }
     }
 
     private fun install(filter: HttpFilter) = filter.also {
@@ -82,6 +96,87 @@ class HttpMonitorTest {
 
         assertEquals(transaction.id, HttpMonitor.find(transaction.id)?.id)
         assertNull(HttpMonitor.find(-1))
+    }
+
+    @Test
+    fun `an installed reporter sees every stored transaction`() {
+        val reporter = RecordingReporter()
+        HttpMonitor.report(reporter)
+
+        record(url = "https://example.com/a")
+        record(url = "https://example.com/b")
+
+        assertEquals(
+            listOf("https://example.com/a", "https://example.com/b"),
+            reporter.reported.map { it.request.url }
+        )
+    }
+
+    @Test
+    fun `the reporter only sees what the filters left`() {
+        val reporter = RecordingReporter()
+        HttpMonitor.report(reporter)
+        install(HeaderRedactingFilter("Authorization"))
+        install(object : HttpFilter {
+            override fun filter(request: HttpRequest): HttpRequest? =
+                request.takeUnless { it.url.contains("/secret") }
+        })
+
+        record(url = "https://example.com/secret")
+        record(url = "https://example.com/public")
+
+        assertEquals(1, reporter.reported.size)
+        assertEquals(
+            HeaderRedactingFilter.REDACTED,
+            reporter.reported.single().request.headers["Authorization"]
+        )
+    }
+
+    @Test
+    fun `a throwing reporter never breaks the call being recorded`() {
+        HttpMonitor.report(object : TransactionReporter {
+            override fun report(transaction: HttpTransaction) = error("reporter is broken")
+        })
+
+        assertNotNull(record())
+        assertEquals(1, HttpMonitor.transactions().size)
+    }
+
+    @Test
+    fun `installing a reporter closes the one it replaces`() {
+        val first = RecordingReporter()
+        val second = RecordingReporter()
+
+        HttpMonitor.report(first)
+        HttpMonitor.report(second)
+
+        assertTrue(first.closed)
+        assertEquals(false, second.closed)
+
+        record()
+        assertEquals(0, first.reported.size)
+        assertEquals(1, second.reported.size)
+    }
+
+    @Test
+    fun `flushReports reaches the installed reporter`() {
+        val reporter = RecordingReporter()
+        HttpMonitor.report(reporter)
+
+        HttpMonitor.flushReports()
+
+        assertEquals(1, reporter.flushes)
+    }
+
+    @Test
+    fun `nothing is reported while capture is stopped`() {
+        val reporter = RecordingReporter()
+        HttpMonitor.report(reporter)
+        HttpMonitor.stop()
+
+        record()
+
+        assertEquals(0, reporter.reported.size)
     }
 
     @Test

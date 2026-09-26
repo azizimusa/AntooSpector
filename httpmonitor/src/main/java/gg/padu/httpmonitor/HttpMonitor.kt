@@ -2,6 +2,7 @@ package gg.padu.httpmonitor
 
 import android.content.Context
 import android.content.Intent
+import gg.padu.httpmonitor.report.TransactionReporter
 import gg.padu.httpmonitor.ui.HttpMonitorActivity
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
@@ -15,6 +16,9 @@ import java.util.concurrent.atomic.AtomicLong
  * HttpMonitor.start(maxTransactions = 500)
  *     .addFilter(HeaderRedactingFilter("Authorization"))
  * ```
+ *
+ * Pass a [TransactionReporter] to [report] to also ship what is captured to a
+ * server; see [gg.padu.httpmonitor.report.AntooReporter].
  */
 object HttpMonitor {
 
@@ -28,6 +32,9 @@ object HttpMonitor {
 
     @Volatile
     private var store: TransactionStore = TransactionStore(DEFAULT_MAX_TRANSACTIONS)
+
+    @Volatile
+    private var reporter: TransactionReporter? = null
 
     /** Capture is a no-op while this is false; the store keeps whatever it already holds. */
     @Volatile
@@ -47,6 +54,18 @@ object HttpMonitor {
     }
 
     fun stop() = apply { isEnabled = false }
+
+    /**
+     * Installs the reporter that captured traffic is shipped to, replacing and
+     * closing any previous one. Pass null to stop reporting.
+     */
+    fun report(reporter: TransactionReporter?) = apply {
+        this.reporter.takeIf { it !== reporter }?.let { previous -> runCatching { previous.close() } }
+        this.reporter = reporter
+    }
+
+    /** Asks the installed reporter to send what it has queued, if any. */
+    fun flushReports() = apply { runCatching { reporter?.flush() } }
 
     fun addFilter(filter: HttpFilter) = apply { filters.add(filter) }
 
@@ -95,6 +114,10 @@ object HttpMonitor {
         }
 
         return HttpTransaction(id, source, filteredRequest, filteredResponse, error)
-            .also { store.record(it) }
+            .also { transaction ->
+                store.record(transaction)
+                // A misbehaving reporter must never break the call being made.
+                runCatching { reporter?.report(transaction) }
+            }
     }
 }
