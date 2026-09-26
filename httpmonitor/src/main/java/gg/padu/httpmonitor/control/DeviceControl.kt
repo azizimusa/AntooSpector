@@ -19,6 +19,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -26,10 +27,17 @@ import java.util.concurrent.atomic.AtomicReference
  * against this install, runs it, and uploads the result — over the same ingest
  * key the reporter already uses.
  *
- * The one action so far is a screenshot, and it is a screenshot of *this app's*
- * window: [ScreenCapture] reads the foreground Activity's own surface, which is
- * always the app's to read, so nothing is prompted and nothing beyond the app is
- * seen. An install with no Activity in the foreground has nothing to capture and
+ * Two actions, both confined to *this app's* own windows:
+ *
+ *  - **screenshot** — [ScreenCapture] reads the foreground Activity's own
+ *    surface, which is always the app's to read, so nothing is prompted and
+ *    nothing beyond the app is seen.
+ *  - **tap** — [RemoteInput] delivers a touch to the window under a point on the
+ *    last screenshot, then a fresh screenshot goes back as that tap's answer, so
+ *    the dashboard shows what the tap did. Also permission-free, and also
+ *    limited to the app: the system UI and other apps are not this app's windows.
+ *
+ * An install with no Activity in the foreground has nothing to capture or tap and
  * says so.
  *
  * ```
@@ -48,6 +56,8 @@ class DeviceControl private constructor(
     private val apiKey: String,
     private val deviceUid: String,
     private val pollIntervalMs: Long,
+    private val busyPollIntervalMs: Long,
+    private val tapSettleMs: Long,
     private val maxDimension: Int,
     private val jpegQuality: Int,
     private val client: OkHttpClient
@@ -62,6 +72,16 @@ class DeviceControl private constructor(
     private var executor: ScheduledExecutorService? = null
     private var captureThread: HandlerThread? = null
     private var capture: ScreenCapture? = null
+    private val input = RemoteInput()
+
+    /**
+     * How long the quick poll interval stays in force. Someone driving the app
+     * from the dashboard sends a run of commands, so the first one switches the
+     * loop to a short delay and each one after it extends that — a tap answering
+     * in half a second is worth the traffic, and an install nobody is watching
+     * goes straight back to the idle interval.
+     */
+    private val busyUntil = AtomicLong(0L)
 
     private val lifecycle = object : Application.ActivityLifecycleCallbacks {
         override fun onActivityResumed(activity: Activity) {
@@ -91,9 +111,9 @@ class DeviceControl private constructor(
 
         executor = Executors.newSingleThreadScheduledExecutor { runnable ->
             Thread(runnable, "antoo-control").apply { isDaemon = true }
-        }.also {
-            it.scheduleWithFixedDelay(::poll, pollIntervalMs, pollIntervalMs, TimeUnit.MILLISECONDS)
         }
+
+        schedule(pollIntervalMs)
     }
 
     fun stop() = apply {
@@ -105,7 +125,25 @@ class DeviceControl private constructor(
         executor = null
         captureThread = null
         capture = null
+        busyUntil.set(0L)
         foreground.set(WeakReference(null))
+    }
+
+    /**
+     * One turn of the loop, rescheduling itself rather than running at a fixed
+     * delay — the interval depends on whether anyone is driving this install.
+     */
+    private fun turn() {
+        runCatching { poll() }
+        schedule(if (System.currentTimeMillis() < busyUntil.get()) busyPollIntervalMs else pollIntervalMs)
+    }
+
+    private fun schedule(delayMs: Long) {
+        if (!started.get()) return
+
+        // A shutdown between the check and here rejects the task; stopping is not
+        // an error, so the rejection is simply the end of the loop.
+        runCatching { executor?.schedule(::turn, delayMs, TimeUnit.MILLISECONDS) }
     }
 
     private fun poll() {
@@ -125,31 +163,83 @@ class DeviceControl private constructor(
             return
         }
 
+        if (commands.isNotEmpty()) busyUntil.set(System.currentTimeMillis() + BUSY_WINDOW_MS)
+
         for (command in commands) {
             when (command.type) {
                 ControlProtocol.TYPE_SCREENSHOT -> runScreenshot(command.id)
+                ControlProtocol.TYPE_TAP -> runTap(command)
                 else -> reportFailure(command.id, "Unsupported command: ${command.type}")
             }
         }
     }
 
     private fun runScreenshot(commandId: Long) {
-        val activity = foreground.get().get()
-        if (activity == null) {
+        if (foreground.get().get() == null) {
             reportFailure(commandId, "No screen is in the foreground.")
             return
         }
 
-        val shot = runCatching {
-            capture?.capture(activity, maxDimension, jpegQuality, CAPTURE_TIMEOUT_MS)
-        }.getOrNull()
-
+        val shot = grab()
         if (shot == null) {
             reportFailure(commandId, "The screen could not be captured.")
             return
         }
 
         upload(commandId, shot)
+    }
+
+    /**
+     * A tap, answered with a screenshot of what it did. The command carries the
+     * image back itself: a tap whose result you cannot see is not much use, and
+     * pairing it with a separate screenshot command would race the app's own
+     * reaction.
+     */
+    private fun runTap(command: ControlProtocol.Command) {
+        val activity = foreground.get().get()
+        if (activity == null) {
+            reportFailure(command.id, "No screen is in the foreground.")
+            return
+        }
+
+        val tap = ControlProtocol.parseTap(command.params)
+        if (tap == null) {
+            reportFailure(command.id, "The tap had no usable coordinates.")
+            return
+        }
+
+        val landed = runCatching { input.tap(activity, tap, TAP_TIMEOUT_MS) }.getOrDefault(false)
+        if (!landed) {
+            reportFailure(command.id, "The tap could not be delivered to the app's window.")
+            return
+        }
+
+        // Let the app react before looking: a tap that opens a screen or a dialog
+        // needs a frame or two, and a screenshot taken mid-transition shows
+        // neither where it was nor where it went.
+        runCatching { Thread.sleep(tapSettleMs) }
+
+        val shot = grab()
+        if (shot == null) {
+            // Said plainly, because the two halves failed differently: the app did
+            // get the tap, so the dashboard must not offer to send it again.
+            reportFailure(command.id, "The tap landed, but the screen could not be captured.")
+            return
+        }
+
+        upload(command.id, shot)
+    }
+
+    /**
+     * The current screen, or null. Read fresh each time — a tap may have moved
+     * the app to another Activity entirely, and that new screen is the answer.
+     */
+    private fun grab(): ScreenCapture.Shot? {
+        val activity = foreground.get().get() ?: return null
+
+        return runCatching {
+            capture?.capture(activity, maxDimension, jpegQuality, CAPTURE_TIMEOUT_MS)
+        }.getOrNull()
     }
 
     private fun upload(commandId: Long, shot: ScreenCapture.Shot) {
@@ -192,7 +282,18 @@ class DeviceControl private constructor(
 
     companion object {
 
+        /** How often an install nobody is driving asks whether there is work. */
         const val DEFAULT_POLL_INTERVAL_MS = 3_000L
+
+        /**
+         * The interval while someone is driving: a tap is only as responsive as
+         * the poll that collects it, and half a second is the difference between
+         * remote control and a form submission.
+         */
+        const val DEFAULT_BUSY_POLL_INTERVAL_MS = 500L
+
+        /** How long the app is given to react to a tap before it is photographed. */
+        const val DEFAULT_TAP_SETTLE_MS = 450L
 
         /**
          * The longest side of an uploaded screenshot. 1080 keeps a phone screen
@@ -206,6 +307,10 @@ class DeviceControl private constructor(
         const val DEFAULT_JPEG_QUALITY = 85
 
         private const val CAPTURE_TIMEOUT_MS = 4_000L
+        private const val TAP_TIMEOUT_MS = 2_000L
+
+        /** Quiet for this long after the last command and the loop idles again. */
+        private const val BUSY_WINDOW_MS = 20_000L
         private const val TAG = "DeviceControl"
 
         private val JPEG = "image/jpeg".toMediaType()
@@ -225,13 +330,20 @@ class DeviceControl private constructor(
             pollIntervalMs: Long = DEFAULT_POLL_INTERVAL_MS,
             maxDimension: Int = DEFAULT_MAX_DIMENSION,
             jpegQuality: Int = DEFAULT_JPEG_QUALITY,
-            client: OkHttpClient = defaultClient()
+            client: OkHttpClient = defaultClient(),
+            // Appended rather than slotted in beside the other intervals: callers
+            // pass these positionally from Java, and a new parameter in the middle
+            // would quietly turn someone's `maxDimension` into a poll interval.
+            busyPollIntervalMs: Long = DEFAULT_BUSY_POLL_INTERVAL_MS,
+            tapSettleMs: Long = DEFAULT_TAP_SETTLE_MS
         ): DeviceControl = DeviceControl(
             context = context,
             controlBase = ControlProtocol.controlBase(endpoint),
             apiKey = apiKey,
             deviceUid = device.uid,
             pollIntervalMs = pollIntervalMs,
+            busyPollIntervalMs = busyPollIntervalMs,
+            tapSettleMs = tapSettleMs,
             maxDimension = maxDimension,
             jpegQuality = jpegQuality,
             client = client

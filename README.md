@@ -10,7 +10,7 @@ so you can watch a tester's device from your desk.
 
 | | |
 | --- | --- |
-| Artifact | `com.github.azizimusa:AntooSpector:1.2.0` (JitPack) |
+| Artifact | `com.github.azizimusa:AntooSpector:1.4.0` (JitPack) |
 | Requires | `minSdk` 24 · Java 11 · OkHttp 4.x |
 | Language | Kotlin, and [fully usable from Java](#using-it-from-java) — no Kotlin plugin needed |
 
@@ -52,7 +52,7 @@ Then in your **app module's** `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    debugImplementation("com.github.azizimusa:AntooSpector:1.2.0")
+    debugImplementation("com.github.azizimusa:AntooSpector:1.4.0")
 }
 ```
 
@@ -386,11 +386,11 @@ never block, never throw.
 
 ---
 
-## Optional: Device Control — screenshots
+## Optional: Device Control — screenshots and taps
 
 Once a device is reporting to the dashboard, Device Control can ask it for a **screenshot of the
-app's own screen** from the dashboard's `/devicecontrol` page. Start it alongside the reporter,
-with the same endpoint and key:
+app's own screen** from the dashboard's `/devicecontrol` page — and **tap that screenshot to tap the
+device**. Start it alongside the reporter, with the same endpoint and key:
 
 ```kotlin
 DeviceControl
@@ -403,6 +403,11 @@ DeviceControl
     .start()
 ```
 
+- **A click on the screenshot is a tap on the app.** The dashboard sends the point as a fraction of
+  the image; the device plays it back as an ordinary touch on the window under it — the Activity, or
+  a dialog or popup over it — and answers with a fresh screenshot of the screen that tap produced.
+  Events go into this app's own view tree, so again **no permission**, and by the same token nothing
+  outside the app can be touched: not the system UI, not the keyboard, not another app.
 - **It captures this app's own window, nothing more.** The image comes from `PixelCopy` on the
   foreground Activity's own surface — content the app already owns — so it needs **no permission**
   and shows the user nothing. There is no capture of the device beyond the app; that is a thing
@@ -412,10 +417,16 @@ DeviceControl
 - **Quietly, and cheaply.** A background daemon thread polls for a request every few seconds and
   uploads a downscaled JPEG (longest side 1080px by default) when one is asked for. Its own polls
   and uploads are never themselves captured.
+- **Quiet when idle, quick when driven.** The poll runs every few seconds normally; the moment a
+  command arrives it drops to half a second for the next twenty, so a tap answers while you are still
+  looking at it, and an install nobody is watching goes straight back to idle.
 
 Tunable on `DeviceControl.from(…)`: `pollIntervalMs` (3 s), `maxDimension` (1080), `jpegQuality`
-(85), and `client` to supply your own `OkHttpClient`. Call `stop()` to unregister and release the
-thread. Guard the `start()` the way you guard `report(…)` so it never runs in a release build.
+(85), `client` to supply your own `OkHttpClient`, and — appended after those, so existing positional
+calls keep their meaning — `busyPollIntervalMs` (500 ms) and `tapSettleMs` (450 ms, how long the app
+is given to react to a tap before it is photographed). Call `stop()` to unregister and release the
+thread. Guard the `start()` the way you guard `report(…)` so
+it never runs in a release build.
 
 ## Redacting and filtering
 
@@ -573,7 +584,7 @@ httpmonitor/   the library itself
 Run the tests and lint above, then push a tag:
 
 ```bash
-git tag 1.3.0 && git push origin 1.3.0
+git tag 1.4.0 && git push origin 1.4.0
 ```
 
 JitPack builds the tag on the first request for that version — there is nothing to upload. The
@@ -581,4 +592,4 @@ published version is the tag name (JitPack passes it to the build as `$VERSION`)
 fallback `version` in `httpmonitor/build.gradle.kts` in step with it so local publishing matches.
 
 Build logs for a tag are at
-<https://jitpack.io/com/github/azizimusa/AntooSpector/1.3.0/build.log>.
+<https://jitpack.io/com/github/azizimusa/AntooSpector/1.4.0/build.log>.

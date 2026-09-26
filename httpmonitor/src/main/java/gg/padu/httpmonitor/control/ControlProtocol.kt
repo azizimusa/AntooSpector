@@ -15,6 +15,16 @@ internal object ControlProtocol {
     data class Command(val id: Long, val type: String, val params: JSONObject)
 
     const val TYPE_SCREENSHOT = "screenshot"
+    const val TYPE_TAP = "tap"
+
+    /** A spot on the last screenshot, and how long to hold it there. */
+    data class Tap(val x: Float, val y: Float, val holdMs: Long)
+
+    /** Long enough to register as a tap and show the app's own press feedback. */
+    const val DEFAULT_TAP_HOLD_MS = 80L
+
+    /** Past this a hold is someone's mistake, not an intention. */
+    const val MAX_TAP_HOLD_MS = 3_000L
 
     /**
      * Derives the control base from the ingest endpoint the reporter uses, e.g.
@@ -48,6 +58,25 @@ internal object ControlProtocol {
             if (id < 0 || type.isEmpty()) null
             else Command(id, type, item.optJSONObject("params") ?: JSONObject())
         }
+    }
+
+    /**
+     * Reads where a tap command wants to land. The point is a *fraction* of the
+     * captured image (0..1) rather than a pixel, so it survives the downscale the
+     * upload applies and a dashboard that knows nothing of the device's
+     * resolution. A point outside the image is refused rather than clamped: an
+     * out-of-range coordinate means the two sides disagree about something, and
+     * guessing at the edge of the screen is a poor way to find out.
+     */
+    fun parseTap(params: JSONObject): Tap? {
+        val x = params.optDouble("x", Double.NaN)
+        val y = params.optDouble("y", Double.NaN)
+        if (!x.isFinite() || !y.isFinite()) return null
+        if (x < 0.0 || x > 1.0 || y < 0.0 || y > 1.0) return null
+
+        val hold = params.optLong("hold_ms", DEFAULT_TAP_HOLD_MS).coerceIn(0L, MAX_TAP_HOLD_MS)
+
+        return Tap(x.toFloat(), y.toFloat(), hold)
     }
 
     private fun encode(value: String): String =

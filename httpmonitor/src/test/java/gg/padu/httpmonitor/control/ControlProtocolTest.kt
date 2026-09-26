@@ -1,6 +1,8 @@
 package gg.padu.httpmonitor.control
 
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -86,5 +88,54 @@ class ControlProtocolTest {
         assertTrue(ControlProtocol.parseCommands("not json").isEmpty())
         assertTrue(ControlProtocol.parseCommands("{}").isEmpty())
         assertTrue(ControlProtocol.parseCommands("""{"commands":[]}""").isEmpty())
+    }
+
+    @Test
+    fun `a tap is read as a fraction of the screenshot`() {
+        val tap = ControlProtocol.parseTap(JSONObject("""{"x":0.25,"y":0.8}"""))
+
+        assertEquals(0.25f, tap!!.x, 0.0001f)
+        assertEquals(0.8f, tap.y, 0.0001f)
+        assertEquals(ControlProtocol.DEFAULT_TAP_HOLD_MS, tap.holdMs)
+    }
+
+    @Test
+    fun `the edges of the screenshot are tappable`() {
+        assertEquals(0f, ControlProtocol.parseTap(JSONObject("""{"x":0,"y":0}"""))!!.x, 0f)
+        assertEquals(1f, ControlProtocol.parseTap(JSONObject("""{"x":1,"y":1}"""))!!.y, 0f)
+    }
+
+    @Test
+    fun `a point off the screenshot is refused, not clamped`() {
+        assertNull(ControlProtocol.parseTap(JSONObject("""{"x":1.2,"y":0.5}""")))
+        assertNull(ControlProtocol.parseTap(JSONObject("""{"x":0.5,"y":-0.1}""")))
+    }
+
+    @Test
+    fun `a tap without both coordinates is refused`() {
+        assertNull(ControlProtocol.parseTap(JSONObject("""{"x":0.5}""")))
+        assertNull(ControlProtocol.parseTap(JSONObject("{}")))
+        assertNull(ControlProtocol.parseTap(JSONObject("""{"x":"half","y":0.5}""")))
+    }
+
+    @Test
+    fun `a hold is honoured, and capped rather than refused`() {
+        assertEquals(600L, ControlProtocol.parseTap(JSONObject("""{"x":0.5,"y":0.5,"hold_ms":600}"""))!!.holdMs)
+        assertEquals(
+            ControlProtocol.MAX_TAP_HOLD_MS,
+            ControlProtocol.parseTap(JSONObject("""{"x":0.5,"y":0.5,"hold_ms":600000}"""))!!.holdMs
+        )
+        assertEquals(0L, ControlProtocol.parseTap(JSONObject("""{"x":0.5,"y":0.5,"hold_ms":-5}"""))!!.holdMs)
+    }
+
+    @Test
+    fun `a tap command parses alongside a screenshot`() {
+        val commands = ControlProtocol.parseCommands(
+            """{"commands":[{"id":3,"type":"tap","params":{"x":0.5,"y":0.5}},{"id":4,"type":"screenshot"}]}"""
+        )
+
+        assertEquals(2, commands.size)
+        assertEquals(ControlProtocol.TYPE_TAP, commands[0].type)
+        assertEquals(ControlProtocol.TYPE_SCREENSHOT, commands[1].type)
     }
 }

@@ -48,7 +48,7 @@ internal class ScreenCapture(private val callbackHandler: Handler) {
         // More than one window up (a dialog, a popup) means the Activity's window
         // does not hold everything on screen — composite them. A single window is
         // the common case and takes the higher-fidelity PixelCopy.
-        val roots = runCatching { shownRoots() }.getOrNull().orEmpty()
+        val roots = runCatching { AppWindows.shown() }.getOrNull().orEmpty()
         if (roots.size > 1) {
             composite(activity, decor, roots, timeoutMs)?.let { return it }
             // Compositing failed; fall through to the single-window copy.
@@ -140,27 +140,6 @@ internal class ScreenCapture(private val callbackHandler: Handler) {
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), Paint().apply {
             color = Color.argb(alpha, 0, 0, 0)
         })
-    }
-
-    /**
-     * The app's attached, visible windows in the order the framework holds them —
-     * addition order, which is bottom-to-top for app dialogs and popups. Read from
-     * WindowManagerGlobal by reflection; only this process's windows are ever in
-     * it, so nothing outside the app can be reached.
-     */
-    @Suppress("UNCHECKED_CAST", "PrivateApi")
-    private fun shownRoots(): List<View> {
-        val global = Class.forName("android.view.WindowManagerGlobal")
-        val instance = global.getMethod("getInstance").invoke(null)
-        val field = global.getDeclaredField("mViews").apply { isAccessible = true }
-
-        val views = when (val value = field.get(instance)) {
-            is List<*> -> value.filterIsInstance<View>()
-            is Array<*> -> value.filterIsInstance<View>()
-            else -> emptyList()
-        }
-
-        return views.filter { it.isShown && it.width > 0 && it.height > 0 }
     }
 
     private fun encode(bitmap: Bitmap, maxDimension: Int, jpegQuality: Int): Shot {

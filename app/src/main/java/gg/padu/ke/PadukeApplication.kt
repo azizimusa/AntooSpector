@@ -37,8 +37,9 @@ class PadukeApplication : Application() {
             )
 
             // Lets the dashboard's Device Control page screenshot this app's own
-            // screen. Polls on its own daemon thread; captures nothing beyond the
-            // app, so it needs no permission.
+            // screen, and tap a spot on that screenshot. Polls on its own daemon
+            // thread; it sees and touches nothing beyond this app, so it needs no
+            // permission.
             DeviceControl
                 .from(
                     context = this,
