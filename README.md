@@ -10,7 +10,7 @@ so you can watch a tester's device from your desk.
 
 | | |
 | --- | --- |
-| Artifact | `com.github.azizimusa:AntooSpector:1.0.0` (JitPack) |
+| Artifact | `com.github.azizimusa:AntooSpector:1.1.0` (JitPack) |
 | Requires | `minSdk` 24 · Java 11 · OkHttp 4.x |
 | Language | Kotlin, and [fully usable from Java](#using-it-from-java) — no Kotlin plugin needed |
 
@@ -52,7 +52,7 @@ Then in your **app module's** `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    debugImplementation("com.github.azizimusa:AntooSpector:1.0.0")
+    debugImplementation("com.github.azizimusa:AntooSpector:1.1.0")
 }
 ```
 
@@ -479,7 +479,7 @@ httpmonitor/   the library itself
 Run the tests and lint above, then push a tag:
 
 ```bash
-git tag 1.1.0 && git push origin 1.1.0
+git tag 1.2.0 && git push origin 1.2.0
 ```
 
 JitPack builds the tag on the first request for that version — there is nothing to upload. The
@@ -487,4 +487,4 @@ published version is the tag name (JitPack passes it to the build as `$VERSION`)
 fallback `version` in `httpmonitor/build.gradle.kts` in step with it so local publishing matches.
 
 Build logs for a tag are at
-<https://jitpack.io/com/github/azizimusa/AntooSpector/1.1.0/build.log>.
+<https://jitpack.io/com/github/azizimusa/AntooSpector/1.2.0/build.log>.
