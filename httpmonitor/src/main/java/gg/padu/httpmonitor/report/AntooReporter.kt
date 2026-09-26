@@ -46,12 +46,19 @@ class AntooReporter @JvmOverloads constructor(
     private val client: OkHttpClient = defaultClient(),
     /**
      * How stale contact may get before the reporter says it is still here. An
-     * empty batch is that statement — the smallest thing the dashboard accepts —
-     * and it rides the flush the reporter already wakes for, so an idle app costs
-     * one short POST per interval and no extra wake-ups. Zero turns it off, and
-     * the dashboard then judges a device by the last traffic it captured.
+     * empty batch is that statement — the smallest thing the dashboard accepts.
+     *
+     * It sets how fast the dashboard can notice this app: it cannot call a device
+     * gone sooner than it expects to hear from it, so a short interval is what
+     * makes "offline" quick. Shorter than [flushIntervalMs] is allowed and is the
+     * default — the reporter then wakes at this cadence, sending a heartbeat when
+     * there is nothing to say and a batch only once the flush interval is up, so
+     * captured traffic still travels in batches of the size you asked for.
+     *
+     * Zero turns heartbeats off, and the dashboard then judges a device by the
+     * last traffic it captured.
      */
-    private val heartbeatIntervalMs: Long = flushIntervalMs
+    private val heartbeatIntervalMs: Long = DEFAULT_HEARTBEAT_INTERVAL_MS
 ) : TransactionReporter {
 
     private val lock = Any()
@@ -66,14 +73,31 @@ class AntooReporter @JvmOverloads constructor(
     /** Guarded by [lock]; when the dashboard last heard anything from us. */
     private var lastContactAt = 0L
 
+    /**
+     * Guarded by [lock]; when the queue was last emptied towards the server. It
+     * starts at construction, so the first flush is an interval away — only the
+     * first heartbeat is immediate.
+     */
+    private var lastDrainAt = System.currentTimeMillis()
+
+    /**
+     * How often the one scheduled task runs. Heartbeats ride it, so it ticks at
+     * whichever of the two intervals comes round sooner; a tick with nothing due
+     * does no work and costs no request.
+     */
+    private val tickIntervalMs =
+        if (heartbeatIntervalMs > 0) minOf(flushIntervalMs, heartbeatIntervalMs) else flushIntervalMs
+
     private val executor: ScheduledExecutorService =
         Executors.newSingleThreadScheduledExecutor { runnable ->
             Thread(runnable, "antoo-reporter").apply { isDaemon = true }
         }
 
     init {
+        // The first tick comes almost at once rather than an interval late: a
+        // freshly launched app should read as online now, not in fifteen seconds.
         executor.scheduleWithFixedDelay(
-            ::drain, flushIntervalMs, flushIntervalMs, TimeUnit.MILLISECONDS
+            ::tick, START_DELAY_MS, tickIntervalMs, TimeUnit.MILLISECONDS
         )
     }
 
@@ -109,8 +133,22 @@ class AntooReporter @JvmOverloads constructor(
         runCatching { executor.execute(::drain) }
     }
 
+    /**
+     * The scheduled wake-up. Queued traffic waits for the flush interval it was
+     * promised; the gaps between flushes are where a heartbeat goes.
+     */
+    private fun tick() {
+        val flushDue = synchronized(lock) {
+            queue.isNotEmpty() && System.currentTimeMillis() - lastDrainAt >= flushIntervalMs
+        }
+
+        if (flushDue) drain() else beat()
+    }
+
     private fun drain() {
         if (System.currentTimeMillis() < synchronized(lock) { nextAttemptAt }) return
+
+        synchronized(lock) { lastDrainAt = System.currentTimeMillis() }
 
         while (true) {
             val batch = synchronized(lock) {
@@ -181,7 +219,8 @@ class AntooReporter @JvmOverloads constructor(
                         clientId = TransactionJson.clientId(sessionBase, it.id),
                         maxBodyChars = maxBodyChars
                     )
-                }
+                },
+                reportIntervalMs = heartbeatIntervalMs
             ).toString()
         }.getOrElse { error ->
             Log.w(TAG, "Could not encode a batch of ${batch.size}; dropping it", error)
@@ -223,11 +262,21 @@ class AntooReporter @JvmOverloads constructor(
 
         const val DEFAULT_QUEUE_CAPACITY = 500
 
+        /**
+         * Contact every five seconds, so the dashboard can call a vanished app
+         * gone within about a dozen. Cheaper than it sounds — a heartbeat is a
+         * couple of hundred bytes on the thread the reporter already owns.
+         */
+        const val DEFAULT_HEARTBEAT_INTERVAL_MS = 5_000L
+
         /** Bodies are capped well below the server's limit; this rides mobile data. */
         const val DEFAULT_MAX_BODY_CHARS = 16_384
 
         /** Turns heartbeats off, so only captured traffic marks a device alive. */
         const val HEARTBEAT_OFF = 0L
+
+        /** Long enough to keep the reporter out of the app's own launch. */
+        private const val START_DELAY_MS = 500L
 
         private const val MAX_BACKOFF_MS = 5 * 60_000L
         private const val MAX_BACKOFF_SHIFT = 5

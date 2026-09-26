@@ -27,9 +27,23 @@ object TransactionJson {
     fun clientId(sessionBase: Long, transactionId: Long): Long =
         sessionBase + Math.floorMod(transactionId, IDS_PER_SESSION)
 
-    fun batch(device: DeviceInfo, transactions: List<JSONObject>): JSONObject = JSONObject().apply {
+    /**
+     * [reportIntervalMs] is how often this client promises to be heard from. The
+     * dashboard needs it to decide how much silence means gone: told the cadence,
+     * it can call a five-second client offline in about a dozen seconds without
+     * misjudging a slower one. Zero leaves it out, and the server falls back to
+     * its own configured window.
+     */
+    @JvmOverloads
+    fun batch(
+        device: DeviceInfo,
+        transactions: List<JSONObject>,
+        reportIntervalMs: Long = 0L
+    ): JSONObject = JSONObject().apply {
         put("app", device.appJson())
-        put("device", device.toJson())
+        put("device", device.toJson().apply {
+            if (reportIntervalMs > 0) put("report_interval_ms", reportIntervalMs)
+        })
         put("transactions", JSONArray(transactions))
     }
 

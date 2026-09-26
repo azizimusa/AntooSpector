@@ -318,15 +318,28 @@ with `if (BuildConfig.ANTOO_ENDPOINT.isNotEmpty() && BuildConfig.ANTOO_KEY.isNot
 
 Tunable constructor parameters: `batchSize` (50), `flushIntervalMs` (15 s), `queueCapacity` (500),
 `maxBodyChars` (16 384), `client` if you want to supply your own `OkHttpClient`, and
-`heartbeatIntervalMs` (defaults to `flushIntervalMs`).
+`heartbeatIntervalMs` (5 s).
 
 ### Online status
 
 The dashboard shows each device as online or offline, and it can only know that if the client
-keeps saying so. When a flush comes round with nothing queued, the reporter posts an **empty
-batch** — a heartbeat. It rides the wake-up the reporter already schedules, so an idle app costs
-one short POST per interval and no extra timers, alarms or wake locks. Contact of any kind counts,
-so a device sending traffic never also sends a heartbeat.
+keeps saying so. With nothing queued, the reporter posts an **empty batch** — a heartbeat, a couple
+of hundred bytes on the one background thread it already owns. Contact of any kind counts, so a
+device sending traffic never also sends a heartbeat.
+
+How quickly the two transitions show up:
+
+| | when it shows | why |
+|---|---|---|
+| **Online** | ~1 s after launch | the reporter reports in as it starts, rather than an interval later |
+| **Offline** | ~12 s after the app dies | two missed heartbeats (5 s each) plus a second of slack, aged out by the dashboard between polls |
+
+`heartbeatIntervalMs` is the dial for the second row: **the dashboard cannot call a device gone
+sooner than it expects to hear from it.** Every batch tells it the cadence, and it sizes that
+device's window from what it was told — so raising the interval to save requests costs detection
+time, and lowering it buys detection time at one short POST per interval. Queued traffic is
+unaffected either way: it still travels in batches on `flushIntervalMs`, so heartbeats do not
+make an app upload more often than you asked.
 
 Pass `heartbeatIntervalMs = AntooReporter.HEARTBEAT_OFF` to stop them; the dashboard then judges a
 device by the last traffic it captured, which reads as offline whenever the app is merely quiet.
@@ -344,7 +357,7 @@ reporting and releases the thread.
   "app": { "platform": "android", "package_name": "gg.padu.ke", "label": "Paduke",
            "tag": "staging", "version": "…", "build": "…" },
   "device": { "uid": "…", "manufacturer": "…", "model": "…", "os_version": "…",
-              "app_version": "…", "app_build": "…" },
+              "app_version": "…", "app_build": "…", "report_interval_ms": 5000 },
   "transactions": [
     {
       "id": 1727330000000001,
@@ -361,8 +374,10 @@ reporting and releases the thread.
 ```
 
 Headers are multi-value (`name -> [values]`). Binary bodies are described rather than sent
-(`"<binary body, 12.4 kB>"`). A 2xx means accepted; 429 and 5xx are retried; anything else drops
-the batch.
+(`"<binary body, 12.4 kB>"`). An empty `transactions` array is a heartbeat, and
+`device.report_interval_ms` is how often the client promises to send one — a receiving end uses it
+to decide how much silence means the app is gone. A 2xx means accepted; 429 and 5xx are retried;
+anything else drops the batch.
 
 To send traffic somewhere else entirely, implement `TransactionReporter` yourself. Its `report`
 is called on the thread that made the HTTP call, so it must only hand the transaction off:

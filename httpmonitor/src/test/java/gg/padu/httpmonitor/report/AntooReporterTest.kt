@@ -5,6 +5,7 @@ import gg.padu.httpmonitor.HttpRequest
 import gg.padu.httpmonitor.HttpResponse
 import gg.padu.httpmonitor.HttpSource
 import gg.padu.httpmonitor.HttpTransaction
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
@@ -63,6 +64,16 @@ class AntooReporterTest {
         )
 
     private fun accepted() = MockResponse().setResponseCode(202).setBody("""{"accepted":1}""")
+
+    /**
+     * Answers everything with 202. A reporter that heartbeats on a tick of its own
+     * sends more than a queue of responses can be sized for.
+     */
+    private fun alwaysAccepts() {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(202)
+        }
+    }
 
     private fun take(timeoutMs: Long = 5_000): RecordedRequest? =
         server.takeRequest(timeoutMs, TimeUnit.MILLISECONDS)
@@ -199,7 +210,7 @@ class AntooReporterTest {
 
     @Test
     fun `an idle reporter says it is still here`() {
-        server.enqueue(MockResponse().setResponseCode(202))
+        alwaysAccepts()
         val reporter = reporter(heartbeatIntervalMs = 50L)
 
         // Nothing captured, so the only thing to send is the fact of being alive.
@@ -224,6 +235,55 @@ class AntooReporterTest {
         reporter.flush()
 
         assertNull(take(timeoutMs = 500))
+    }
+
+    @Test
+    fun `presence is announced at startup rather than an interval later`() {
+        alwaysAccepts()
+
+        // A minute between flushes, five seconds between heartbeats: waiting for
+        // either would fail this. The reporter reports in as it starts.
+        reporter(heartbeatIntervalMs = 5_000L)
+
+        val hello = take(timeoutMs = 2_000)
+        assertNotNull("nothing was sent at startup", hello)
+        assertEquals(0, hello!!.json().getJSONArray("transactions").length())
+    }
+
+    @Test
+    fun `heartbeats keep their own cadence between flushes`() {
+        alwaysAccepts()
+
+        reporter(heartbeatIntervalMs = 100L)
+
+        // Three in a row, none of them waiting on the one-minute flush interval.
+        repeat(3) { assertNotNull("heartbeat ${it + 1} never came", take(timeoutMs = 2_000)) }
+    }
+
+    @Test
+    fun `a heartbeat says how often it will be heard from`() {
+        alwaysAccepts()
+
+        reporter(heartbeatIntervalMs = 5_000L)
+
+        val device = take(timeoutMs = 2_000)!!.json().getJSONObject("device")
+        assertEquals(5_000L, device.getLong("report_interval_ms"))
+    }
+
+    @Test
+    fun `queued traffic still waits for the flush interval`() {
+        alwaysAccepts()
+
+        // Heartbeats tick every 50 ms, but a flush is a minute away: the ticks
+        // must not carry the queue out early.
+        val reporter = reporter(heartbeatIntervalMs = 50L)
+        reporter.report(transaction(1))
+
+        // The heartbeats themselves are the only traffic for the next while.
+        repeat(3) {
+            val request = take(timeoutMs = 2_000)
+            assertEquals(0, request!!.json().getJSONArray("transactions").length())
+        }
     }
 
     @Test
