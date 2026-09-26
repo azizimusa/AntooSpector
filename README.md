@@ -386,6 +386,37 @@ never block, never throw.
 
 ---
 
+## Optional: Device Control — screenshots
+
+Once a device is reporting to the dashboard, Device Control can ask it for a **screenshot of the
+app's own screen** from the dashboard's `/devicecontrol` page. Start it alongside the reporter,
+with the same endpoint and key:
+
+```kotlin
+DeviceControl
+    .from(
+        context = this,
+        endpoint = BuildConfig.ANTOO_ENDPOINT,   // the same ingest URL the reporter uses
+        apiKey = BuildConfig.ANTOO_KEY,
+        device = DeviceInfo.from(this)            // the same install id
+    )
+    .start()
+```
+
+- **It captures this app's own window, nothing more.** The image comes from `PixelCopy` on the
+  foreground Activity's own surface — content the app already owns — so it needs **no permission**
+  and shows the user nothing. There is no capture of the device beyond the app; that is a thing
+  Android gates behind its own consent prompt and an ordinary app cannot do.
+- **It only answers while a screen is up.** With no Activity in the foreground there is nothing to
+  capture, and the device says so; the dashboard shows the request as failed rather than hanging.
+- **Quietly, and cheaply.** A background daemon thread polls for a request every few seconds and
+  uploads a downscaled JPEG (longest side 720px by default) when one is asked for. Its own polls
+  and uploads are never themselves captured.
+
+Tunable on `DeviceControl.from(…)`: `pollIntervalMs` (3 s), `maxDimension` (720), `jpegQuality`
+(60), and `client` to supply your own `OkHttpClient`. Call `stop()` to unregister and release the
+thread. Guard the `start()` the way you guard `report(…)` so it never runs in a release build.
+
 ## Redacting and filtering
 
 An `HttpFilter` runs **before** anything is stored, so whatever it strips never reaches the in-app
