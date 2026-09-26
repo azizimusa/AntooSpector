@@ -139,6 +139,49 @@ class TransactionJsonTest {
     }
 
     @Test
+    fun `a batch names the app it came from, so one key can cover several`() {
+        val device = DeviceInfo(
+            uid = "install-1",
+            appVersion = "1.4.0",
+            appBuild = "42",
+            packageName = "gg.padu.ke",
+            appLabel = "Paduke"
+        )
+
+        val app = TransactionJson.batch(device, listOf(encode(transaction()))).getJSONObject("app")
+
+        assertEquals("android", app.getString("platform"))
+        assertEquals("gg.padu.ke", app.getString("package_name"))
+        assertEquals("Paduke", app.getString("label"))
+        assertEquals("1.4.0", app.getString("version"))
+        assertEquals("42", app.getString("build"))
+        // Nothing was set to tell two builds of one package apart.
+        assertFalse(app.has("tag"))
+    }
+
+    @Test
+    fun `a tag tells two builds of the same package apart`() {
+        val device = DeviceInfo(uid = "install-1", packageName = "gg.padu.ke", tag = "staging")
+
+        val app = TransactionJson.batch(device, listOf(encode(transaction()))).getJSONObject("app")
+
+        assertEquals("staging", app.getString("tag"))
+        assertEquals("gg.padu.ke", app.getString("package_name"))
+    }
+
+    @Test
+    fun `the device object stays about the device`() {
+        val device = DeviceInfo(uid = "install-1", packageName = "gg.padu.ke", tag = "staging")
+
+        val json = device.toJson()
+
+        // Package and tag belong to the app object; repeating them here would
+        // invite the dashboard to read the app's identity off the wrong one.
+        assertFalse(json.has("package_name"))
+        assertFalse(json.has("tag"))
+    }
+
+    @Test
     fun `client ids from two sessions never collide`() {
         val first = TransactionJson.sessionBase(1_790_000_000_000)
         val second = TransactionJson.sessionBase(1_790_000_001_000)

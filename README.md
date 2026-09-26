@@ -10,7 +10,7 @@ so you can watch a tester's device from your desk.
 
 | | |
 | --- | --- |
-| Artifact | `com.github.azizimusa:AntooSpector:1.1.0` (JitPack) |
+| Artifact | `com.github.azizimusa:AntooSpector:1.2.0` (JitPack) |
 | Requires | `minSdk` 24 · Java 11 · OkHttp 4.x |
 | Language | Kotlin, and [fully usable from Java](#using-it-from-java) — no Kotlin plugin needed |
 
@@ -52,7 +52,7 @@ Then in your **app module's** `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    debugImplementation("com.github.azizimusa:AntooSpector:1.1.0")
+    debugImplementation("com.github.azizimusa:AntooSpector:1.2.0")
 }
 ```
 
@@ -240,6 +240,23 @@ HttpMonitor.INSTANCE.report(
 id kept in the library's own `SharedPreferences`. The dashboard groups traffic by that id.
 Uninstalling the app resets it — it identifies an install, not a person.
 
+It also reads the app's own identity off the build — package name, app label, platform — and
+sends it alongside the device. One ingest key covers a whole project in the dashboard, and that
+is how each app files itself under it. **You never type a package name into the dashboard.**
+
+When one package ships as several things worth telling apart — a staging flavour, a white-label
+build, a per-tester install — pass a tag and each becomes its own app in the dashboard:
+
+```kotlin
+DeviceInfo.from(this, tag = "staging")
+```
+
+```java
+DeviceInfo.from(this, "staging")
+```
+
+Without a tag, the package name is the identifier, so all builds of one package are one app.
+
 ### Keep the endpoint and key out of version control
 
 Put them in `local.properties` (git-ignored) and expose them as `BuildConfig` fields — this
@@ -295,6 +312,8 @@ reporting and releases the thread.
 
 ```json
 {
+  "app": { "platform": "android", "package_name": "gg.padu.ke", "label": "Paduke",
+           "tag": "staging", "version": "…", "build": "…" },
   "device": { "uid": "…", "manufacturer": "…", "model": "…", "os_version": "…",
               "app_version": "…", "app_build": "…" },
   "transactions": [
@@ -385,7 +404,7 @@ arguments don't exist in Java, so `start(…)` takes both parameters explicitly.
 | `HttpMonitor.show(context)` | `HttpMonitor.INSTANCE.show(context)` |
 | `Bodies.asCurl(transaction)` | `Bodies.INSTANCE.asCurl(transaction)` |
 | `UrlInstrument.openConnection(url)` | `UrlInstrument.openConnection(url)` (static) |
-| `DeviceInfo.from(context)` | `DeviceInfo.from(context)` (static) |
+| `DeviceInfo.from(context, tag = "staging")` | `DeviceInfo.from(context, "staging")` (static) |
 | `transaction.request.url` | `transaction.getRequest().getUrl()` |
 
 Everything else — `HttpMonitorInterceptor`, `AntooReporter`, `DeviceInfo`, `HeaderRedactingFilter` —
@@ -479,7 +498,7 @@ httpmonitor/   the library itself
 Run the tests and lint above, then push a tag:
 
 ```bash
-git tag 1.2.0 && git push origin 1.2.0
+git tag 1.3.0 && git push origin 1.3.0
 ```
 
 JitPack builds the tag on the first request for that version — there is nothing to upload. The
@@ -487,4 +506,4 @@ published version is the tag name (JitPack passes it to the build as `$VERSION`)
 fallback `version` in `httpmonitor/build.gradle.kts` in step with it so local publishing matches.
 
 Build logs for a tag are at
-<https://jitpack.io/com/github/azizimusa/AntooSpector/1.2.0/build.log>.
+<https://jitpack.io/com/github/azizimusa/AntooSpector/1.3.0/build.log>.

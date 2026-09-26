@@ -28,6 +28,7 @@ object TransactionJson {
         sessionBase + Math.floorMod(transactionId, IDS_PER_SESSION)
 
     fun batch(device: DeviceInfo, transactions: List<JSONObject>): JSONObject = JSONObject().apply {
+        put("app", device.appJson())
         put("device", device.toJson())
         put("transactions", JSONArray(transactions))
     }
