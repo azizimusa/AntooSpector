@@ -67,10 +67,13 @@ class DeviceInfo @JvmOverloads constructor(
          *
          * Pass [tag] to file this build under its own app in the dashboard even
          * though it shares a package name — and an ingest key — with another.
+         *
+         * Pass [label] to name this install: two testers on the same phone model
+         * are otherwise told apart only by the tail of an install id.
          */
         @JvmStatic
         @JvmOverloads
-        fun from(context: Context, tag: String? = null): DeviceInfo {
+        fun from(context: Context, tag: String? = null, label: String? = null): DeviceInfo {
             val app = context.applicationContext
             val packageInfo = runCatching {
                 app.packageManager.getPackageInfo(app.packageName, 0)
@@ -83,6 +86,7 @@ class DeviceInfo @JvmOverloads constructor(
 
             return DeviceInfo(
                 uid = installId(app),
+                label = label?.takeIf { it.isNotBlank() },
                 manufacturer = Build.MANUFACTURER,
                 model = Build.MODEL,
                 osVersion = "Android ${Build.VERSION.RELEASE}",

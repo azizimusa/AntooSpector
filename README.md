@@ -257,6 +257,23 @@ DeviceInfo.from(this, "staging")
 
 Without a tag, the package name is the identifier, so all builds of one package are one app.
 
+### Naming a device
+
+Installs are told apart by an id the library mints, and shown in the dashboard as the phone's
+make and model — so two testers on the same model read alike, distinguished only by the tail of
+that id. Name the install to fix that:
+
+```kotlin
+DeviceInfo.from(this, tag = "staging", label = "Azizi's Pixel")
+```
+
+```java
+DeviceInfo.from(this, "staging", "Azizi's Pixel");   // tag first, then label
+```
+
+A label is what the dashboard shows wherever the device appears. Nothing enforces uniqueness —
+it is a name for you to read, and the install id underneath stays the real identity.
+
 ### Keep the endpoint and key out of version control
 
 Put them in `local.properties` (git-ignored) and expose them as `BuildConfig` fields — this
